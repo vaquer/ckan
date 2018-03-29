@@ -10,6 +10,7 @@ import fanstatic.core as core
 
 # This imports patches fanstatic
 import ckan.lib.fanstatic_extensions as fanstatic_extensions
+from ckan.common import config
 
 log = logging.getLogger(__name__)
 
