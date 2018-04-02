@@ -6,6 +6,7 @@ import json
 import hashlib
 import os
 import re
+import cgi
 
 import sqlalchemy as sa
 from beaker.middleware import CacheMiddleware, SessionMiddleware
@@ -20,6 +21,7 @@ from routes.middleware import RoutesMiddleware
 from repoze.who.config import WhoConfig
 from repoze.who.middleware import PluggableAuthenticationMiddleware
 from fanstatic import Fanstatic
+from webob.request import FakeCGIBody
 
 from ckan.plugins import PluginImplementations
 from ckan.plugins.interfaces import IMiddleware
@@ -30,6 +32,49 @@ from ckan.config.environment import load_environment
 import ckan.lib.app_globals as app_globals
 
 log = logging.getLogger(__name__)
+
+
+class RootPathMiddleware(object):
+    '''
+    Prevents the SCRIPT_NAME server variable conflicting with the ckan.root_url
+    config. The routes package uses the SCRIPT_NAME variable and appends to the
+    path and ckan addes the root url causing a duplication of the root path.
+    This is a middleware to ensure that even redirects use this logic.
+    '''
+    def __init__(self, app, config):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        # Prevents the variable interfering with the root_path logic
+        if 'SCRIPT_NAME' in environ:
+            environ['SCRIPT_NAME'] = ''
+
+        return self.app(environ, start_response)
+
+
+class CloseWSGIInputMiddleware(object):
+    '''
+    webob.request.Request has habit to create FakeCGIBody. This leads(
+    during file upload) to creating temporary files that are not closed.
+    For long lived processes this means that for each upload you will
+    spend the same amount of temporary space as size of uploaded
+    file additionally, until server restart(this will automatically
+    close temporary files).
+    This middleware is supposed to close such files after each request.
+    '''
+    def __init__(self, app, config):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        wsgi_input = environ['wsgi.input']
+        if isinstance(wsgi_input, FakeCGIBody):
+            for _, item in wsgi_input.vars.items():
+                if not isinstance(item, cgi.FieldStorage):
+                    continue
+                fp = getattr(item, 'fp', None)
+                if fp is not None:
+                    fp.close()
+        return self.app(environ, start_response)
 
 
 def make_app(conf, full_stack=True, static_files=True, **app_conf):
@@ -67,6 +112,8 @@ def make_app(conf, full_stack=True, static_files=True, **app_conf):
         app = plugin.make_middleware(app, config)
 
     # Routing/Session/Cache Middleware
+    app = CloseWSGIInputMiddleware(app, config)
+    app = RootPathMiddleware(app, config)
     app = RoutesMiddleware(app, config['routes.map'])
     # we want to be able to retrieve the routes middleware to be able to update
     # the mapper.  We store it in the pylons config to allow this.
