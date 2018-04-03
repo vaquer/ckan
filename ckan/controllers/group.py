@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 render = base.render
 abort = base.abort
+redirect = base.redirect
 
 NotFound = logic.NotFound
 NotAuthorized = logic.NotAuthorized
@@ -573,7 +574,8 @@ class GroupController(base.BaseController):
             group = self._action('group_create')(context, data_dict)
 
             # Redirect to the appropriate _read route for the type of group
-            h.redirect_to(group['type'] + '_read', id=group['name'])
+            redirect(h.url_for(controller=group['type'], action='read', id=group['name']))
+            # h.redirect_to(group['type'] + '_read', id=group['name'])
         except NotAuthorized:
             abort(401, _('Unauthorized to read group %s') % '')
         except NotFound, e:
@@ -605,7 +607,7 @@ class GroupController(base.BaseController):
             if id != group['name']:
                 self._force_reindex(group)
 
-            h.redirect_to('%s_read' % group['type'], id=group['name'])
+            redirect(h.url_for(controller=group['type'], action='read', id=group['name']))
         except NotAuthorized:
             abort(401, _('Unauthorized to read group %s') % id)
         except NotFound, e:
